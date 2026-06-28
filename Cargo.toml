@@ -1,0 +1,27 @@
+[package]
+name = "viewport-lib-wind"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Wind field plugin for viewport-lib: per-vertex displacement, CPU sampler, runtime + GPU plugins"
+readme = "README.md"
+license = "GPL-3.0-only"
+repository = "https://github.com/grimandgreedy/viewport-lib-wind"
+homepage = "https://github.com/grimandgreedy/viewport-lib-wind"
+documentation = "https://docs.rs/viewport-lib-wind"
+keywords = ["3d", "wind", "vertex", "viewport", "viewport-lib"]
+categories = ["graphics", "rendering"]
+publish = true
+
+[dependencies]
+viewport-lib = { path = "../viewport-lib" }
+glam = { version = "=0.30.10", features = ["bytemuck"] }
+bytemuck = { version = "1", features = ["derive"] }
+wgpu = "27.0"
+
+[dev-dependencies]
+pollster = "0.4"
+
+[[example]]
+name = "wind-minimal"
+path = "examples/wind_minimal.rs"
