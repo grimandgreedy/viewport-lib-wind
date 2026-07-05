@@ -4,7 +4,7 @@
 use std::sync::{Arc, Mutex};
 
 use viewport_lib::MeshId;
-use viewport_lib::resources::ViewportGpuResources;
+use viewport_lib::resources::DeviceResources;
 use viewport_lib::runtime::{
     GpuFrameContext, GpuPlugin, RuntimePlugin, RuntimeStepContext, gpu_phase, phase,
 };
@@ -149,7 +149,7 @@ impl WindPlugin {
     /// reference the slot directly.
     pub fn install(
         &self,
-        resources: &mut ViewportGpuResources,
+        resources: &mut DeviceResources,
         device: &wgpu::Device,
     ) -> Result<DeformerId, viewport_lib::ViewportError> {
         let desc = DeformerDesc {
@@ -172,7 +172,7 @@ impl WindPlugin {
     /// yet.
     pub fn attach_sway_mask(
         &self,
-        resources: &mut ViewportGpuResources,
+        resources: &mut DeviceResources,
         device: &wgpu::Device,
         mesh_id: MeshId,
         weights: &WindSwayWeights,
@@ -196,11 +196,17 @@ impl WindPlugin {
     /// Detach the sway mask from one mesh.
     pub fn detach_sway_mask(
         &self,
-        resources: &mut ViewportGpuResources,
+        resources: &mut DeviceResources,
         device: &wgpu::Device,
         mesh_id: MeshId,
     ) -> bool {
-        let slot = match self.inner.lock().expect("wind plugin poisoned").slot.as_ref() {
+        let slot = match self
+            .inner
+            .lock()
+            .expect("wind plugin poisoned")
+            .slot
+            .as_ref()
+        {
             Some(h) => h.slot(),
             None => return false,
         };
@@ -222,7 +228,7 @@ impl WindPlugin {
     /// Returns `false` and does nothing if [`Self::install`] has not run.
     pub fn attach_material_params(
         &self,
-        resources: &mut ViewportGpuResources,
+        resources: &mut DeviceResources,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         mesh_id: MeshId,
@@ -376,8 +382,7 @@ mod tests {
             eprintln!("skipping: no wgpu adapter available");
             return;
         };
-        let mut resources =
-            ViewportGpuResources::new(&device, wgpu::TextureFormat::Bgra8UnormSrgb, 1);
+        let mut resources = DeviceResources::new(&device, wgpu::TextureFormat::Bgra8UnormSrgb, 1);
         // One internal registration (skinning) is present at construction.
         let baseline = resources.registered_deformer_count();
 
@@ -394,8 +399,7 @@ mod tests {
             eprintln!("skipping: no wgpu adapter available");
             return;
         };
-        let mut resources =
-            ViewportGpuResources::new(&device, wgpu::TextureFormat::Bgra8UnormSrgb, 1);
+        let mut resources = DeviceResources::new(&device, wgpu::TextureFormat::Bgra8UnormSrgb, 1);
         let plane = viewport_lib::geometry::primitives::grid_plane(1.0, 1.0, 4, 4);
         let mesh_id = resources.upload_mesh_data(&device, &plane).unwrap();
 
@@ -417,8 +421,7 @@ mod tests {
             eprintln!("skipping: no wgpu adapter available");
             return;
         };
-        let mut resources =
-            ViewportGpuResources::new(&device, wgpu::TextureFormat::Bgra8UnormSrgb, 1);
+        let mut resources = DeviceResources::new(&device, wgpu::TextureFormat::Bgra8UnormSrgb, 1);
         let plane = viewport_lib::geometry::primitives::grid_plane(1.0, 1.0, 4, 4);
         let mesh_id = resources.upload_mesh_data(&device, &plane).unwrap();
 
