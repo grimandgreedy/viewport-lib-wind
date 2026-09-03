@@ -373,7 +373,15 @@ mod tests {
             force_fallback_adapter: false,
         }))
         .ok()?;
-        pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).ok()
+        // Per-vertex deformers need raised device limits (max_bind_groups >= 3,
+        // max_storage_buffers_per_shader_stage >= 9); default limits are too low.
+        pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            required_limits: viewport_lib::renderer::ViewportRenderer::recommended_device_limits(
+                &adapter,
+            ),
+            ..Default::default()
+        }))
+        .ok()
     }
 
     #[test]
