@@ -52,7 +52,7 @@ pub use shader::{
 /// Bump in lockstep with `viewport_lib::plugin_api::shared_wgsl::WGSL_VERSION`
 /// whenever the shared-WGSL contract changes. The compile-time assertion
 /// below catches accidental drift.
-pub const VIEWPORT_LIB_WGSL_VERSION: u32 = 11;
+pub const VIEWPORT_LIB_WGSL_VERSION: u32 = 12;
 
 const _: () = assert!(
     viewport_lib::plugin_api::shared_wgsl::WGSL_VERSION == VIEWPORT_LIB_WGSL_VERSION,
