@@ -12,7 +12,9 @@
 //!   absent.
 //! - Global wind state from
 //!   `deform_header.slot_params[ctx.slot * 4 .. + 4]`, written each frame
-//!   by [`crate::WindPlugin`]'s GPU half.
+//!   by [`crate::WindPlugin`]'s GPU half. Word 2 carries the renderer's world
+//!   origin: world-space deformer positions are relative to it, so the gust
+//!   phase adds it back to stay put when the origin moves.
 //!
 //! The formula matches [`crate::WindField::sample`] modulo the per-material
 //! multipliers, so a vertex drawn through the deformer and a CPU spring
@@ -21,7 +23,7 @@
 
 /// Catalogue version for [`WIND_DEFORMER_BODY`]. Bump on any formula or
 /// slot-params layout change.
-pub const WGSL_VERSION: u32 = 3;
+pub const WGSL_VERSION: u32 = 4;
 
 /// Name the wind deformer registers under.
 pub const WIND_DEFORMER_NAME: &str = "viewport_lib_wind";
@@ -69,12 +71,16 @@ fn deform(v: DeformVertex, ctx: DeformContext) -> DeformVertex {
     let freq = p1.y * mat_speed;
     let density = p1.z * mat_density;
     let time = p1.w;
+    let origin = deform_header.slot_params[slot * 4u + 2u].xyz;
     let dlen_sq = dot(dir, dir);
     if dlen_sq < 1e-8 {
         return out;
     }
     let ndir = dir * inverseSqrt(dlen_sq);
-    let phase = time * freq + (v.position.x + v.position.z) * density;
+    // The phase is keyed on the absolute position, so it does not shift when
+    // the renderer's world origin moves.
+    let world = v.position + origin;
+    let phase = time * freq + (world.x + world.z) * density;
     let g = sin(phase) * gust;
     out.position = v.position + ndir * ((base + g) * mask * mat_strength);
     return out;

@@ -78,8 +78,9 @@ impl WindField {
         self.time
     }
 
-    /// Sample the wind at a world-space position. Matches the WGSL helper
-    /// formula in [`crate::SHARED_WIND_WGSL`].
+    /// Sample the wind at a world-space position, in world coordinates rather
+    /// than relative to the renderer's world origin. Matches the deformer
+    /// formula in [`crate::WIND_DEFORMER_BODY`].
     pub fn sample(&self, world_pos: Vec3) -> Vec3 {
         let dir = match self.authoring.direction.try_normalize() {
             Some(d) => d,
@@ -109,7 +110,10 @@ impl WindField {
     /// Layout:
     /// - `[0]` = `(direction.x, direction.y, direction.z, base_strength)`
     /// - `[1]` = `(gust_strength, gust_frequency, spatial_density, time)`
-    /// - `[2]` / `[3]` are reserved for future use.
+    /// - `[2]` = the renderer's world origin in xyz, which this leaves at zero;
+    ///   [`crate::WindPlugin`] fills it in from
+    ///   [`set_world_origin`](crate::WindPlugin::set_world_origin)
+    /// - `[3]` is reserved for future use.
     pub fn to_slot_params(&self) -> [[f32; 4]; 4] {
         let d = self.authoring.direction;
         [

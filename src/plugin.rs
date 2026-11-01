@@ -98,6 +98,9 @@ impl WindSwayWeights {
 /// taking ownership of each other.
 struct WindInner {
     field: WindField,
+    /// The world origin the renderer draws relative to, from
+    /// [`WindPlugin::set_world_origin`].
+    world_origin: glam::DVec3,
     /// `Some` once [`WindPlugin::install`] has registered the deformer.
     slot: Option<DeformSlotHandle>,
 }
@@ -134,6 +137,7 @@ impl WindPlugin {
         Self {
             inner: Arc::new(Mutex::new(WindInner {
                 field: WindField::new(authoring),
+                world_origin: glam::DVec3::ZERO,
                 slot: None,
             })),
         }
@@ -153,7 +157,7 @@ impl WindPlugin {
         device: &wgpu::Device,
     ) -> Result<DeformerId, viewport_lib::ViewportError> {
         let desc = DeformerDesc {
-            name: WIND_DEFORMER_NAME,
+            name: WIND_DEFORMER_NAME.into(),
             stage: DeformStage::WorldSpace,
             priority: 0,
             wgsl_body: WIND_DEFORMER_BODY.to_string(),
@@ -276,6 +280,19 @@ impl WindPlugin {
             .set_authoring(authoring);
     }
 
+    /// Set the world origin the renderer draws relative to, so the gust phase
+    /// stays keyed on the absolute position. Pass `renderer.world_origin()`
+    /// each frame; it is written into the slot params at the next
+    /// `pre_prepare`. That value is the origin of the previous frame, so the
+    /// phase is one frame late on a frame where the origin moves. Under
+    /// `WorldOrigin::Zero` there is nothing to set.
+    pub fn set_world_origin(&self, origin: impl Into<glam::DVec3>) {
+        self.inner
+            .lock()
+            .expect("wind plugin poisoned")
+            .world_origin = origin.into();
+    }
+
     /// Snapshot the field for CPU consumers. Returns a clone so the caller
     /// can sample without holding the lock for the read.
     pub fn field(&self) -> WindField {
@@ -322,7 +339,9 @@ impl GpuPlugin for WindGpuHalf {
     ) -> Vec<wgpu::CommandBuffer> {
         let inner = self.inner.lock().expect("wind plugin poisoned");
         if let Some(handle) = inner.slot.as_ref() {
-            let params = inner.field.to_slot_params();
+            let mut params = inner.field.to_slot_params();
+            let o = inner.world_origin.as_vec3();
+            params[2] = [o.x, o.y, o.z, 0.0];
             handle.write(queue, &params);
         }
         Vec::new()
