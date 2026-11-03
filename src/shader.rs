@@ -23,7 +23,7 @@
 
 /// Catalogue version for [`WIND_DEFORMER_BODY`]. Bump on any formula or
 /// slot-params layout change.
-pub const WGSL_VERSION: u32 = 4;
+pub const WGSL_VERSION: u32 = 5;
 
 /// Name the wind deformer registers under.
 pub const WIND_DEFORMER_NAME: &str = "viewport_lib_wind";
@@ -80,7 +80,7 @@ fn deform(v: DeformVertex, ctx: DeformContext) -> DeformVertex {
     // The phase is keyed on the absolute position, so it does not shift when
     // the renderer's world origin moves.
     let world = v.position + origin;
-    let phase = time * freq + (world.x + world.z) * density;
+    let phase = time * freq + (world.x + world.y) * density;
     let g = sin(phase) * gust;
     out.position = v.position + ndir * ((base + g) * mask * mat_strength);
     return out;

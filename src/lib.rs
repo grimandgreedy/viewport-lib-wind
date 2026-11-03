@@ -24,7 +24,7 @@
 //!     .with_gpu_plugin(wind.gpu_plugin());
 //!
 //! // Per wind-affected mesh:
-//! let mask = WindSwayWeights::height_falloff(&positions, 0.0, top_y);
+//! let mask = WindSwayWeights::height_falloff(&positions, 0.0, top_z);
 //! wind.attach_sway_mask(&mut resources, &device, mesh_id, &mask);
 //! ```
 //!

@@ -87,7 +87,7 @@ impl WindField {
             None => return Vec3::ZERO,
         };
         let phase = self.time * self.authoring.gust_frequency
-            + (world_pos.x + world_pos.z) * self.authoring.spatial_density;
+            + (world_pos.x + world_pos.y) * self.authoring.spatial_density;
         let gust = phase.sin() * self.authoring.gust_strength;
         dir * (self.authoring.base_strength + gust)
     }

@@ -1,27 +1,27 @@
 # viewport-lib-wind
 
-Smooth, cyclical wind-like motion for meshes in `viewport-lib`. Geometry sways and ripples the way grass, foliage, cloth, and banners move in a breeze, driven by repeating vertex displacement rather than a physics sim. Handy for animation, rendering, and games.
+Wind sway for [viewport-lib](https://github.com/grimandgreedy/viewport-lib) meshes: grass, foliage and banners ripple in a gusting breeze, driven by per-vertex displacement in the mesh shaders rather than a physics sim. The same field is sampled on the CPU, so spring bones, particles or cloth can follow the wind the renderer draws.
 
-Under the hood it is a single global wind vector with gust modulation, mirrored to the GPU as a small uniform buffer and to a CPU sampler that consumers can use directly.
+<p align="center">
+  <img src="https://github.com/grimandgreedy/viewport-lib-wind/blob/master/assets/wind.gif?raw=true" alt="viewport-lib-wind" width="50%" />
+</p>
 
-## Use
+## Examples
 
-```rust
-use viewport_lib::runtime::ViewportRuntime;
-use viewport_lib_wind::{WindAuthoring, WindPlugin};
+- **wind-meadow**: a meadow of grass, plants and trees swaying in the wind.
+- **wind-minimal**: no window; samples the field on the CPU.
 
-let wind = WindPlugin::new(WindAuthoring::default());
-
-let runtime = ViewportRuntime::new()
-    .with_plugin(wind.cpu_plugin())
-    .with_gpu_plugin(wind.gpu_plugin());
-
-// Sample the field from anywhere on the CPU:
-let v = wind.field().sample(glam::Vec3::new(2.0, 0.0, 1.0));
+```sh
+cargo run --release --example wind-meadow
+cargo run --release --example wind-minimal
 ```
 
-The CPU sampler and the WGSL helper (`SHARED_WIND_WGSL`) use the same formula, so vertex shaders and any CPU consumer (spring bones, particles, cloth) see the same field at the same world position.
+## Versions
 
+| viewport-lib-wind | viewport-lib |
+| --- | --- |
+| 0.2.0 | 0.23 |
+| 0.1.0 | 0.19 |
 
 ## License
 

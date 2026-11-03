@@ -75,18 +75,18 @@ impl WindSwayWeights {
         }
     }
 
-    /// Sway scales with vertex height: vertices at `base_y` get `0.0`,
-    /// vertices at `top_y` get `1.0`, anything outside the range is
+    /// Sway scales with vertex height along Z: vertices at `base_z` get `0.0`,
+    /// vertices at `top_z` get `1.0`, anything outside the range is
     /// clamped. Use this for grass blades and tree foliage, where the
     /// root stays put and the tip catches the wind.
-    pub fn height_falloff(positions: &[[f32; 3]], base_y: f32, top_y: f32) -> Self {
-        let range = top_y - base_y;
+    pub fn height_falloff(positions: &[[f32; 3]], base_z: f32, top_z: f32) -> Self {
+        let range = top_z - base_z;
         let sway_mask = if range.abs() < f32::EPSILON {
             vec![0.0; positions.len()]
         } else {
             positions
                 .iter()
-                .map(|p| ((p[1] - base_y) / range).clamp(0.0, 1.0))
+                .map(|p| ((p[2] - base_z) / range).clamp(0.0, 1.0))
                 .collect()
         };
         Self { sway_mask }
@@ -118,7 +118,7 @@ struct WindInner {
 ///     .with_gpu_plugin(wind.gpu_plugin());
 ///
 /// // For each grass / banner / branch mesh:
-/// let mask = WindSwayWeights::height_falloff(&positions, 0.0, top_y);
+/// let mask = WindSwayWeights::height_falloff(&positions, 0.0, top_z);
 /// wind.attach_sway_mask(&mut resources, &device, mesh_id, &mask)?;
 /// ```
 ///
@@ -364,10 +364,10 @@ mod tests {
     fn height_falloff_is_zero_at_base_and_one_at_top() {
         let positions = vec![
             [0.0, 0.0, 0.0],
-            [0.0, 1.0, 0.0],
-            [0.0, 2.0, 0.0],
-            [0.0, -1.0, 0.0],
-            [0.0, 5.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [0.0, 0.0, 2.0],
+            [0.0, 0.0, -1.0],
+            [0.0, 0.0, 5.0],
         ];
         let w = WindSwayWeights::height_falloff(&positions, 0.0, 2.0);
         assert_eq!(w.sway_mask[0], 0.0);
@@ -379,7 +379,7 @@ mod tests {
 
     #[test]
     fn height_falloff_degenerate_range_is_zero() {
-        let positions = vec![[0.0, 1.0, 0.0], [0.0, 1.0, 0.0]];
+        let positions = vec![[0.0, 0.0, 1.0], [0.0, 0.0, 1.0]];
         let w = WindSwayWeights::height_falloff(&positions, 1.0, 1.0);
         assert!(w.sway_mask.iter().all(|&m| m == 0.0));
     }
