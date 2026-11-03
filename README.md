@@ -13,7 +13,6 @@ Wind sway for [viewport-lib](https://github.com/grimandgreedy/viewport-lib) mesh
 
 ```sh
 cargo run --release --example wind-meadow
-cargo run --release --example wind-minimal
 ```
 
 ## Versions
