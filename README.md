@@ -3,7 +3,7 @@
 Wind sway for [viewport-lib](https://github.com/grimandgreedy/viewport-lib) meshes: grass, foliage and banners ripple in a gusting breeze, driven by per-vertex displacement in the mesh shaders rather than a physics sim. The same field is sampled on the CPU, so spring bones, particles or cloth can follow the wind the renderer draws.
 
 <p align="center">
-  <img src="https://github.com/grimandgreedy/viewport-lib-wind/blob/master/assets/wind.gif?raw=true" alt="viewport-lib-wind" width="50%" />
+  <img src="https://raw.githubusercontent.com/grimandgreedy/viewport-lib-wind/refs/heads/main/assets/wind.gif" alt="viewport-lib-wind" width="50%" />
 </p>
 
 ## Examples
