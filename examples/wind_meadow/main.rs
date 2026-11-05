@@ -7,9 +7,10 @@
 //! take a smaller share of the wind than the grass. The rocks have no mask and
 //! stay still.
 //!
-//! The app is a plain winit loop around a `ViewportInstance`. It steps the wind
-//! plugin's CPU half with `step_runtime` and runs its GPU half with
-//! `pre_prepare` before rendering, so the deformer sees this frame's wind.
+//! The app runs on `ViewportApp`. The window's setup callback attaches a
+//! runtime holding the wind plugin's CPU and GPU halves; the runner steps the
+//! CPU half and runs the GPU half before each frame, so the deformer sees this
+//! frame's wind.
 //!
 //! Controls:
 //!   Left drag    : orbit
@@ -21,22 +22,18 @@
 
 mod models;
 
+use std::cell::{Cell, RefCell};
 use std::f32::consts::{FRAC_PI_2, TAU};
-use std::sync::Arc;
-use std::time::Instant;
+use std::rc::Rc;
 
-use glam::{Mat4, Quat, Vec2, Vec3};
-use viewport_lib::input::adapters::{AdapterCtx, winit as vpl_winit};
-use viewport_lib::runtime::{GpuFrameContext, ViewportRuntime};
+use glam::{Mat4, Quat, Vec3};
+use viewport_lib::runners::viewport_app::RedrawMode;
+use viewport_lib::runtime::ViewportRuntime;
 use viewport_lib::{
-    ButtonState, Camera, Colour, InputOwnership, Material, OrbitCameraController, ViewportContext,
-    ViewportEvent, ViewportInstance, ViewportRenderer, primitives, viewer_bindings, wgpu,
+    AppConfig, ButtonState, Camera, Colour, Material, ViewportApp, ViewportEvent, ViewportInstance,
+    WindowConfig, primitives, wgpu,
 };
 use viewport_lib_wind::{WindAuthoring, WindMaterialParams, WindPlugin};
-use winit::application::ApplicationHandler;
-use winit::event::WindowEvent;
-use winit::event_loop::{ActiveEventLoop, EventLoop};
-use winit::window::{Window, WindowAttributes, WindowId};
 
 use models::{Model, ModelLoader};
 
@@ -177,203 +174,75 @@ fn build_meadow(
     }
 }
 
-struct State {
-    window: Arc<Window>,
-    surface: wgpu::Surface<'static>,
-    device: wgpu::Device,
-    queue: wgpu::Queue,
-    config: wgpu::SurfaceConfiguration,
-    viewport: ViewportInstance,
-    orbit: OrbitCameraController,
-    wind: WindPlugin,
-    wind_on: bool,
-    last_frame: Instant,
-    frame_index: u64,
-}
-
-impl State {
-    fn new(event_loop: &ActiveEventLoop) -> Self {
-        let window = Arc::new(
-            event_loop
-                .create_window(
-                    WindowAttributes::default()
-                        .with_title("viewport-lib-wind : meadow")
-                        .with_inner_size(winit::dpi::LogicalSize::new(1280u32, 720u32)),
-                )
-                .expect("window"),
-        );
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
-        let surface = instance.create_surface(window.clone()).expect("surface");
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::HighPerformance,
-            compatible_surface: Some(&surface),
-            ..Default::default()
-        }))
-        .expect("adapter");
-        // Per-vertex deformers need the raised limits (more bind groups and
-        // storage buffers than the wgpu defaults).
-        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-            required_features: ViewportRenderer::recommended_device_features(&adapter),
-            required_limits: ViewportRenderer::recommended_device_limits(&adapter),
-            ..Default::default()
-        }))
-        .expect("device");
-
-        let size = window.inner_size();
-        let caps = surface.get_capabilities(&adapter);
-        let format = caps
-            .formats
-            .iter()
-            .copied()
-            .find(|f| f.is_srgb())
-            .unwrap_or(caps.formats[0]);
-        let config = wgpu::SurfaceConfiguration {
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            format,
-            width: size.width.max(1),
-            height: size.height.max(1),
-            present_mode: wgpu::PresentMode::AutoVsync,
-            alpha_mode: caps.alpha_modes[0],
-            view_formats: vec![],
-            desired_maximum_frame_latency: 2,
-        };
-        surface.configure(&device, &config);
-
-        let wind = WindPlugin::new(breeze());
-        let runtime = ViewportRuntime::new()
-            .with_plugin(wind.cpu_plugin())
-            .with_gpu_plugin(wind.gpu_plugin());
-        let mut viewport = ViewportInstance::new(&device, format)
-            .with_bindings(viewer_bindings())
-            .with_runtime(runtime);
-        wind.install(viewport.resources_mut(), &device)
-            .expect("register wind deformer");
-        build_meadow(&mut viewport, &wind, &device, &queue);
-
-        let frame = viewport.viewport_frame_mut();
-        frame.background_colour = Some(Colour::srgb_rgb(0.62, 0.78, 0.92));
-        frame.show_axes_indicator = false;
-        let lighting = &mut viewport.effects_mut().lighting;
-        lighting.sky_colour = Colour::srgb_rgb(0.80, 0.88, 1.0);
-        lighting.ground_colour = Colour::srgb_rgb(0.45, 0.50, 0.35);
-
-        // A low view across the meadow from the south, trees at the back.
-        // The orbit eye sits along the orientation's local +Z.
-        let pitch = 14f32.to_radians();
-        let orientation = Quat::from_rotation_z(-0.35) * Quat::from_rotation_x(FRAC_PI_2 - pitch);
-        *viewport.camera_mut() = Camera::orbit(glam::DVec3::new(0.0, 2.0, 1.2), 20.0, orientation);
-
-        let [w, h] = [config.width as f32, config.height as f32];
-        viewport.begin_frame(ViewportContext::new(InputOwnership::full_window(), [w, h]));
-
-        Self {
-            window,
-            surface,
-            device,
-            queue,
-            config,
-            viewport,
-            orbit: OrbitCameraController::new_stateless(),
-            wind,
-            wind_on: true,
-            last_frame: Instant::now(),
-            frame_index: 0,
-        }
-    }
-
-    fn redraw(&mut self) {
-        let frame = match self.surface.get_current_texture() {
-            Ok(f) => f,
-            Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
-                self.surface.configure(&self.device, &self.config);
-                self.window.request_redraw();
-                return;
-            }
-            Err(e) => {
-                eprintln!("surface error: {e:?}");
-                return;
-            }
-        };
-        let view = frame
-            .texture
-            .create_view(&wgpu::TextureViewDescriptor::default());
-        let [w, h] = [self.config.width as f32, self.config.height as f32];
-
-        let now = Instant::now();
-        let dt = (now - self.last_frame).as_secs_f32().min(0.1);
-        self.last_frame = now;
-
-        // Advance the wind clock, move the camera, and assemble the frame.
-        self.viewport.step_runtime(dt);
-        self.viewport.update_orbit(&mut self.orbit, dt);
-
-        // Push this frame's wind into the deformer, then render.
-        let camera = self.viewport.camera().clone();
-        let ctx = GpuFrameContext::new(&camera, Vec2::new(w, h), dt, self.frame_index);
-        let runtime = self.viewport.runtime_mut().expect("runtime attached");
-        let plugin_cmds = runtime.pre_prepare(&self.device, &self.queue, &ctx);
-        let cmd = self.viewport.render(&self.device, &self.queue, &view);
-        self.queue
-            .submit(plugin_cmds.into_iter().chain(std::iter::once(cmd)));
-        frame.present();
-        self.frame_index += 1;
-
-        self.viewport
-            .begin_frame(ViewportContext::new(InputOwnership::full_window(), [w, h]));
-        self.window.request_redraw();
-    }
-
-    fn input(&mut self, event: &WindowEvent) {
-        let mut events = Vec::new();
-        vpl_winit::translate(event, &AdapterCtx::default(), &mut events);
-        for ev in events {
-            if let ViewportEvent::Key {
-                state: ButtonState::Pressed,
-                logical: Some(' '),
-                ..
-            } = ev
-            {
-                self.wind_on = !self.wind_on;
-                self.wind
-                    .set_authoring(if self.wind_on { breeze() } else { calm() });
-            }
-            self.viewport.handle_event(ev);
-        }
-    }
-}
-
-#[derive(Default)]
-struct App {
-    state: Option<State>,
-}
-
-impl ApplicationHandler for App {
-    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        if self.state.is_none() {
-            self.state = Some(State::new(event_loop));
-        }
-    }
-
-    fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
-        let Some(state) = self.state.as_mut() else {
-            return;
-        };
-        match event {
-            WindowEvent::CloseRequested => event_loop.exit(),
-            WindowEvent::Resized(size) if size.width > 0 && size.height > 0 => {
-                state.config.width = size.width;
-                state.config.height = size.height;
-                state.surface.configure(&state.device, &state.config);
-                let size = [size.width as f32, size.height as f32];
-                state.viewport.set_viewport_size(size);
-            }
-            WindowEvent::RedrawRequested => state.redraw(),
-            other => state.input(&other),
-        }
-    }
-}
-
 fn main() {
-    let event_loop = EventLoop::new().expect("event loop");
-    event_loop.run_app(&mut App::default()).expect("run");
+    // The setup callback runs again on a new instance after a device loss, so
+    // it builds the wind plugin each time; the frame callback toggles whichever
+    // one is current.
+    let wind: Rc<RefCell<Option<WindPlugin>>> = Rc::new(RefCell::new(None));
+    let wind_on = Rc::new(Cell::new(true));
+    let setup_wind = wind.clone();
+    let setup_wind_on = wind_on.clone();
+
+    ViewportApp::new(AppConfig::default())
+        .window(
+            WindowConfig::default()
+                .with_title("viewport-lib-wind : meadow")
+                .with_window_size(1280, 720)
+                .with_redraw_mode(RedrawMode::Continuous),
+            move |setup| {
+                let device = setup.device().clone();
+                let queue = setup.queue().clone();
+
+                let plugin = WindPlugin::new(if setup_wind_on.get() {
+                    breeze()
+                } else {
+                    calm()
+                });
+                setup.set_runtime(
+                    ViewportRuntime::new()
+                        .with_plugin(plugin.cpu_plugin())
+                        .with_gpu_plugin(plugin.gpu_plugin()),
+                );
+                plugin
+                    .install(setup.resources_mut(), &device)
+                    .expect("register wind deformer");
+                build_meadow(setup, &plugin, &device, &queue);
+
+                let frame = setup.viewport_frame_mut();
+                frame.background_colour = Some(Colour::srgb_rgb(0.62, 0.78, 0.92));
+                frame.show_axes_indicator = false;
+                let lighting = &mut setup.effects_mut().lighting;
+                lighting.sky_colour = Colour::srgb_rgb(0.80, 0.88, 1.0);
+                lighting.ground_colour = Colour::srgb_rgb(0.45, 0.50, 0.35);
+
+                // A low view across the meadow from the south, trees at the
+                // back. The orbit eye sits along the orientation's local +Z.
+                let pitch = 14f32.to_radians();
+                let orientation =
+                    Quat::from_rotation_z(-0.35) * Quat::from_rotation_x(FRAC_PI_2 - pitch);
+                *setup.camera_mut() =
+                    Camera::orbit(glam::DVec3::new(0.0, 2.0, 1.2), 20.0, orientation);
+
+                *setup_wind.borrow_mut() = Some(plugin);
+            },
+            move |ctx| {
+                let toggled = ctx.events().iter().any(|event| {
+                    matches!(
+                        event,
+                        ViewportEvent::Key {
+                            state: ButtonState::Pressed,
+                            logical: Some(' '),
+                            ..
+                        }
+                    )
+                });
+                if toggled {
+                    wind_on.set(!wind_on.get());
+                    if let Some(plugin) = wind.borrow().as_ref() {
+                        plugin.set_authoring(if wind_on.get() { breeze() } else { calm() });
+                    }
+                }
+            },
+        )
+        .run();
 }

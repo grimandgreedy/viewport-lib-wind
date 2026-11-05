@@ -22,9 +22,8 @@ wgpu = "27.0"
 
 [dev-dependencies]
 pollster = "0.4"
-# The meadow example is a hand-written winit app around a ViewportInstance.
-viewport-lib = { version = "0.23", features = ["winit-adapter"] }
-winit = "0.30"
+# The meadow example runs on ViewportApp.
+viewport-lib = { version = "0.23", features = ["app"] }
 # Loads the meadow models and their textures.
 viewport-lib-io = { version = "0.9", default-features = false, features = ["gltf", "png"] }
 
