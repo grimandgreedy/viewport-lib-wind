@@ -89,9 +89,10 @@ pub struct WindSway2d {
     /// `1.0` sways by the full field. Stored at 16-bit float precision.
     pub weight: f32,
     /// Round the offset to whole texels of the quad's texture, so pixel art
-    /// shears in one-texel steps instead of smearing. Assumes the simple draw
-    /// mode: sliced and tiled sprites have no single texel size. An
-    /// untextured quad is not rounded.
+    /// shears in one-texel steps instead of smearing. An untextured quad is
+    /// not rounded. Assumes the simple draw mode: the step is the quad's size
+    /// over its source texels, so a stretched sliced or tiled sprite steps by
+    /// its stretch rather than by the texel its art is drawn at.
     pub pixel_art: bool,
 }
 
