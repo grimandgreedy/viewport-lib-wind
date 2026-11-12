@@ -37,7 +37,8 @@ pub const WIND_SPRITE_DEFORMER_NAME: &str = "viewport_lib_wind_2d";
 /// same phase and magnitude, so the offset at a quad's top edge is
 /// `dot(WindField::sample(base), right) * weight` along `right`, with `base`
 /// the midpoint of the quad's bottom edge in world space and `weight` from
-/// the quad's [`WindSway2d`] user value. The mesh path's
+/// the quad's [`WindSway2d`] user value. In pixel-art mode the offset is
+/// rounded to whole texels of the quad's texture along `right`. The mesh path's
 /// strength, density and speed multipliers have no sprite equivalent and are
 /// 1.0 here.
 pub const WIND_SPRITE_DEFORMER_BODY: &str = r#"
@@ -66,32 +67,52 @@ fn deform_sprite(v: SpriteVertex, slot: u32) -> vec3<f32> {
     let world_base = v.base + origin;
     let phase = time * freq + (world_base.x + world_base.y) * density;
     let wind = ndir * (base + sin(phase) * gust);
-    return v.world + v.right * (dot(wind, v.right) * weight * v.local_uv.y);
+    var shift = dot(wind, v.right) * weight * v.local_uv.y;
+    // Pixel-art mode: whole texels only, so the quad shears in steps.
+    if (v.user & 0x10000u) != 0u && v.texel.x > 0.0 {
+        shift = round(shift / v.texel.x) * v.texel.x;
+    }
+    return v.world + v.right * shift;
 }
 "#;
 
 /// How far one sprite or tile sways, packed into the `u32` user value the
 /// sprite and tile deformer reads.
 ///
-/// The low 16 bits hold `weight` as a 16-bit float; the rest are reserved
-/// and zero. The user value is shared by every vertex hook on a batch, so a
-/// host whose own material reads it has to leave the low 16 bits to the wind.
+/// The low 16 bits hold `weight` as a 16-bit float and bit 16 is
+/// `pixel_art`; the rest are reserved and zero. The user value is shared by
+/// every vertex hook on a batch, so a host whose own material reads it has to
+/// leave the low 17 bits to the wind.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct WindSway2d {
     /// Multiplier on the offset at the quad's top edge. `0.0` does not sway,
     /// `1.0` sways by the full field. Stored at 16-bit float precision.
     pub weight: f32,
+    /// Round the offset to whole texels of the quad's texture, so pixel art
+    /// shears in one-texel steps instead of smearing. Assumes the simple draw
+    /// mode: sliced and tiled sprites have no single texel size. An
+    /// untextured quad is not rounded.
+    pub pixel_art: bool,
 }
 
 impl WindSway2d {
     /// Sways by `weight`.
     pub fn new(weight: f32) -> Self {
-        Self { weight }
+        Self {
+            weight,
+            pixel_art: false,
+        }
+    }
+
+    /// This sway in pixel-art mode.
+    pub fn with_pixel_art(mut self) -> Self {
+        self.pixel_art = true;
+        self
     }
 
     /// The user value for a sprite or tile.
     pub fn to_user_value(self) -> u32 {
-        f16_bits(self.weight) as u32
+        f16_bits(self.weight) as u32 | (self.pixel_art as u32) << PIXEL_ART_BIT
     }
 
     /// The sway a user value encodes. The reverse of [`Self::to_user_value`]
@@ -99,6 +120,7 @@ impl WindSway2d {
     pub fn from_user_value(value: u32) -> Self {
         Self {
             weight: f16_to_f32(value as u16),
+            pixel_art: value & (1 << PIXEL_ART_BIT) != 0,
         }
     }
 
@@ -124,6 +146,9 @@ impl WindSway2d {
         out
     }
 }
+
+/// The user-value bit that turns on pixel-art mode.
+const PIXEL_ART_BIT: u32 = 16;
 
 /// `x` as IEEE 754 half-precision bits, rounded to nearest even, matching
 /// WGSL's `pack2x16float` for finite values.
@@ -251,6 +276,16 @@ mod tests {
         }
         let w = WindSway2d::from_user_value(WindSway2d::new(0.3).to_user_value()).weight;
         assert!((w - 0.3).abs() < 1e-3);
+    }
+
+    #[test]
+    fn pixel_art_is_bit_16() {
+        let v = WindSway2d::new(1.0).with_pixel_art().to_user_value();
+        assert_eq!(v, 0x1_3c00);
+        let back = WindSway2d::from_user_value(v);
+        assert!(back.pixel_art);
+        assert_eq!(back.weight, 1.0);
+        assert!(!WindSway2d::from_user_value(0x3c00).pixel_art);
     }
 
     #[test]
