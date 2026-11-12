@@ -12,7 +12,8 @@
 //! - With the `2d` feature, sprites and tile layers sway through a sprite
 //!   and tile deformer that reads the mesh deformer's slot params.
 //!   `WindPlugin::install_2d` registers it; a batch or layer opts in with
-//!   `WindPlugin::sprite_deformers`.
+//!   `WindPlugin::sprite_deformers`, and `WindSway2d` sets how far each
+//!   sprite or tile sways.
 //!
 //! Typical setup:
 //!
@@ -53,7 +54,7 @@ pub use shader::{
     WIND_SWAY_STRIDE_BYTES,
 };
 #[cfg(feature = "2d")]
-pub use sprite::{WIND_SPRITE_DEFORMER_BODY, WIND_SPRITE_DEFORMER_NAME};
+pub use sprite::{WIND_SPRITE_DEFORMER_BODY, WIND_SPRITE_DEFORMER_NAME, WindSway2d};
 
 /// Catalogue version of `viewport-lib` this crate was built against.
 ///
