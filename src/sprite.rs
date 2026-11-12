@@ -89,10 +89,10 @@ pub struct WindSway2d {
     /// `1.0` sways by the full field. Stored at 16-bit float precision.
     pub weight: f32,
     /// Round the offset to whole texels of the quad's texture, so pixel art
-    /// shears in one-texel steps instead of smearing. An untextured quad is
-    /// not rounded. Assumes the simple draw mode: the step is the quad's size
-    /// over its source texels, so a stretched sliced or tiled sprite steps by
-    /// its stretch rather than by the texel its art is drawn at.
+    /// shears in one-texel steps instead of smearing. The step is one texel
+    /// as drawn: the stretched texel of a simple sprite, a border texel of a
+    /// sliced one, a tile's texel of a tiled one. An untextured quad is not
+    /// rounded.
     pub pixel_art: bool,
 }
 
@@ -365,7 +365,9 @@ mod render_tests {
     use viewport_lib::{
         Camera2d, CameraFrame, Colour, FrameData, Plane2d, SceneFrame, TextureData,
     };
-    use viewport_lib_plugins::item_types::sprite::{SpriteItem, SpriteSizeMode};
+    use viewport_lib_plugins::item_types::sprite::{
+        SpriteDrawMode, SpriteItem, SpriteSizeMode, TileMode,
+    };
     use viewport_lib_plugins::item_types::tilemap::{Tile, Tilemap, TilemapItem, Tileset};
 
     const W: u32 = 240;
@@ -483,19 +485,38 @@ mod render_tests {
     const TOP_ROW: f32 = SIDE * 0.5 - 0.5;
     const BOTTOM_ROW: f32 = -SIDE * 0.5 + 0.5;
 
-    /// The left edge of a square centred at `x`, displaced at its top by
-    /// `shift`, at height `y`. A red pixel centre lies at or right of it.
-    fn expected_left(x: f32, shift: f32, y: f32) -> f32 {
-        x - SIDE * 0.5 + shift * (y + SIDE * 0.5) / SIDE
+    /// The left edge of a quad `SIDE` high centred at height 0, whose left
+    /// edge at rest is at `left`, displaced at its top by `shift`, at height
+    /// `y`. A red pixel centre lies at or right of it.
+    fn expected_left(left: f32, shift: f32, y: f32) -> f32 {
+        left + shift * (y + SIDE * 0.5) / SIDE
     }
 
-    fn assert_left_edge(pixels: &[u8], x: f32, shift: f32, y: f32) {
-        let want = expected_left(x, shift, y);
+    /// Check the left edge of a quad whose left edge at rest is at `left`.
+    fn assert_left_edge_from(pixels: &[u8], left: f32, shift: f32, y: f32) {
+        let want = expected_left(left, shift, y);
         let got = left_edge(pixels, want - 6.0, y);
         assert!(
             got >= want - 0.25 && got <= want + 1.25,
-            "square at {x}, row {y}: left edge pixel {got}, edge expected at {want}"
+            "quad from {left}, row {y}: left edge pixel {got}, edge expected at {want}"
         );
+    }
+
+    /// Check the left edge of a square centred at `x`.
+    fn assert_left_edge(pixels: &[u8], x: f32, shift: f32, y: f32) {
+        assert_left_edge_from(pixels, x - SIDE * 0.5, shift, y);
+    }
+
+    /// A white 8 by 8 texture.
+    fn white_texture(rig: &mut Rig) -> viewport_lib::TextureId {
+        rig.renderer
+            .resources_mut()
+            .upload_texture(
+                &rig.device,
+                &rig.queue,
+                TextureData::srgb(8, 8, vec![255; 8 * 8 * 4]),
+            )
+            .expect("texture upload")
     }
 
     /// Two squares on `plane`, centred at x = -60 and 60 at height 0, sway by
@@ -604,15 +625,7 @@ mod render_tests {
         };
         // An 8 texel texture over 40 units: one texel is 5 units, so a 7 unit
         // offset rounds to 5.
-        let texture = rig
-            .renderer
-            .resources_mut()
-            .upload_texture(
-                &rig.device,
-                &rig.queue,
-                TextureData::srgb(8, 8, vec![255; 8 * 8 * 4]),
-            )
-            .expect("texture upload");
+        let texture = white_texture(&mut rig);
         let mut item = rig.squares(
             vec![[-60.0, 0.0, 0.0], [60.0, 0.0, 0.0]],
             &[WindSway2d::new(1.0).with_pixel_art(), WindSway2d::new(1.0)],
@@ -621,5 +634,46 @@ mod render_tests {
         let pixels = rig.sprites(Plane2d::Xy, item);
         assert_left_edge(&pixels, -60.0, 5.0, TOP_ROW);
         assert_left_edge(&pixels, 60.0, 7.0, TOP_ROW);
+    }
+
+    /// A sliced or tiled sprite steps by the texel its art is drawn at, not by
+    /// how far the quad stretches the texture.
+    #[test]
+    fn pixel_art_steps_by_the_drawn_texel_on_sliced_and_tiled_sprites() {
+        // 7.2 units of offset. Stretched across 80 units, an 8 texel texture
+        // has 10-unit texels, which would round the offset to 10.
+        let Some(mut rig) = rig(steady(7.2), 0.0) else {
+            return;
+        };
+        let texture = white_texture(&mut rig);
+        let cases = [
+            // Border texels 2 units wide: 7.2 rounds to 8.
+            (
+                SpriteDrawMode::Sliced {
+                    border: [2.0; 4],
+                    units_per_texel: 2.0,
+                },
+                8.0,
+            ),
+            // 20-unit tiles of 8 texels, 2.5 units a texel: 7.2 rounds to 7.5.
+            (
+                SpriteDrawMode::Tiled {
+                    tile_size: [20.0, 20.0],
+                    mode: TileMode::Continuous,
+                },
+                7.5,
+            ),
+        ];
+        for (mode, shift) in cases {
+            let mut item = rig.squares(
+                vec![[0.0, 0.0, 0.0]],
+                &[WindSway2d::new(1.0).with_pixel_art()],
+            );
+            item.texture_id = Some(texture);
+            item.sizes = vec![[80.0, SIDE]];
+            item.draw_mode = mode;
+            let pixels = rig.sprites(Plane2d::Xy, item);
+            assert_left_edge_from(&pixels, -40.0, shift, TOP_ROW);
+        }
     }
 }
