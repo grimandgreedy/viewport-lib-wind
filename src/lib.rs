@@ -9,6 +9,10 @@
 //!   keeps its slot params in sync with the CPU clock.
 //! - Rust code calls [`WindField::sample`] for spring bones, particles, or
 //!   any other CPU consumer that needs the same vector the renderer sees.
+//! - With the `2d` feature, sprites and tile layers sway through a sprite
+//!   and tile deformer that reads the mesh deformer's slot params.
+//!   `WindPlugin::install_2d` registers it; a batch or layer opts in with
+//!   `WindPlugin::sprite_deformers`.
 //!
 //! Typical setup:
 //!
@@ -36,6 +40,8 @@ mod field;
 mod globals;
 mod plugin;
 mod shader;
+#[cfg(feature = "2d")]
+mod sprite;
 
 pub use field::{WindAuthoring, WindField};
 pub use globals::WindGlobals;
@@ -46,6 +52,8 @@ pub use shader::{
     WGSL_VERSION, WIND_DEFORMER_BODY, WIND_DEFORMER_NAME, WIND_MATERIAL_PARAMS_STRIDE_BYTES,
     WIND_SWAY_STRIDE_BYTES,
 };
+#[cfg(feature = "2d")]
+pub use sprite::{WIND_SPRITE_DEFORMER_BODY, WIND_SPRITE_DEFORMER_NAME};
 
 /// Catalogue version of `viewport-lib` this crate was built against.
 ///

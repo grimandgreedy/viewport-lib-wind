@@ -96,13 +96,20 @@ impl WindSwayWeights {
 /// GPU-side state owned by the plugin. Held behind an `Arc<Mutex<_>>` so
 /// the `RuntimePlugin` and `GpuPlugin` halves can share access without
 /// taking ownership of each other.
-struct WindInner {
+pub(crate) struct WindInner {
     field: WindField,
     /// The world origin the renderer draws relative to, from
     /// [`WindPlugin::set_world_origin`].
     world_origin: glam::DVec3,
     /// `Some` once [`WindPlugin::install`] has registered the deformer.
     slot: Option<DeformSlotHandle>,
+    /// The mesh deformer's id, which the sprite deformer reads its slot
+    /// params through.
+    pub(crate) deformer: Option<DeformerId>,
+    /// `Some` once [`WindPlugin::install_2d`] has registered the sprite and
+    /// tile deformer.
+    #[cfg(feature = "2d")]
+    pub(crate) sprite_deformer: Option<viewport_lib_plugins::item_types::sprite::SpriteDeformerId>,
 }
 
 /// Wind plugin handle.
@@ -127,7 +134,7 @@ struct WindInner {
 /// during `runtime.pre_prepare()` so every wind-affected mesh sees the
 /// same global field that frame.
 pub struct WindPlugin {
-    inner: Arc<Mutex<WindInner>>,
+    pub(crate) inner: Arc<Mutex<WindInner>>,
 }
 
 impl WindPlugin {
@@ -139,6 +146,9 @@ impl WindPlugin {
                 field: WindField::new(authoring),
                 world_origin: glam::DVec3::ZERO,
                 slot: None,
+                deformer: None,
+                #[cfg(feature = "2d")]
+                sprite_deformer: None,
             })),
         }
     }
@@ -165,7 +175,9 @@ impl WindPlugin {
         };
         let id = resources.register_deformer(device, desc)?;
         let handle = resources.deform_slot_handle(id);
-        self.inner.lock().expect("wind plugin poisoned").slot = Some(handle);
+        let mut inner = self.inner.lock().expect("wind plugin poisoned");
+        inner.slot = Some(handle);
+        inner.deformer = Some(id);
         Ok(id)
     }
 
@@ -349,7 +361,7 @@ impl GpuPlugin for WindGpuHalf {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use glam::Vec3;
 
@@ -384,7 +396,7 @@ mod tests {
         assert!(w.sway_mask.iter().all(|&m| m == 0.0));
     }
 
-    fn try_make_device() -> Option<(wgpu::Device, wgpu::Queue)> {
+    pub(crate) fn try_make_device() -> Option<(wgpu::Device, wgpu::Queue)> {
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::LowPower,

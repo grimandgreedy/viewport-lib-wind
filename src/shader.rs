@@ -21,9 +21,10 @@
 //! bone tracking the same world position see the same wind to within float
 //! precision when the material defaults are in play.
 
-/// Catalogue version for [`WIND_DEFORMER_BODY`]. Bump on any formula or
-/// slot-params layout change.
-pub const WGSL_VERSION: u32 = 5;
+/// Catalogue version for [`WIND_DEFORMER_BODY`] and, with the `2d` feature,
+/// the sprite and tile body that reads the same slot params. Bump on any
+/// formula or slot-params layout change.
+pub const WGSL_VERSION: u32 = 6;
 
 /// Name the wind deformer registers under.
 pub const WIND_DEFORMER_NAME: &str = "viewport_lib_wind";
