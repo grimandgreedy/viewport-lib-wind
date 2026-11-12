@@ -112,6 +112,19 @@ pub(crate) struct WindInner {
     pub(crate) sprite_deformer: Option<viewport_lib_plugins::item_types::sprite::SpriteDeformerId>,
 }
 
+impl WindInner {
+    /// Write the field and the world origin into the deformer's slot params.
+    /// Does nothing before [`WindPlugin::install`].
+    fn write_slot_params(&self, queue: &wgpu::Queue) {
+        if let Some(handle) = self.slot.as_ref() {
+            let mut params = self.field.to_slot_params();
+            let o = self.world_origin.as_vec3();
+            params[2] = [o.x, o.y, o.z, 0.0];
+            handle.write(queue, &params);
+        }
+    }
+}
+
 /// Wind plugin handle.
 ///
 /// Typical setup:
@@ -316,6 +329,17 @@ impl WindPlugin {
     }
 }
 
+#[cfg(test)]
+impl WindPlugin {
+    /// Advance the clock by `dt` and write the slot params, as one runtime
+    /// step and `pre_prepare` would.
+    pub(crate) fn step_and_write(&self, queue: &wgpu::Queue, dt: f32) {
+        let mut inner = self.inner.lock().expect("wind plugin poisoned");
+        inner.field.advance(dt);
+        inner.write_slot_params(queue);
+    }
+}
+
 struct WindCpuHalf {
     inner: Arc<Mutex<WindInner>>,
 }
@@ -349,13 +373,10 @@ impl GpuPlugin for WindGpuHalf {
         queue: &wgpu::Queue,
         _ctx: &GpuFrameContext<'_>,
     ) -> Vec<wgpu::CommandBuffer> {
-        let inner = self.inner.lock().expect("wind plugin poisoned");
-        if let Some(handle) = inner.slot.as_ref() {
-            let mut params = inner.field.to_slot_params();
-            let o = inner.world_origin.as_vec3();
-            params[2] = [o.x, o.y, o.z, 0.0];
-            handle.write(queue, &params);
-        }
+        self.inner
+            .lock()
+            .expect("wind plugin poisoned")
+            .write_slot_params(queue);
         Vec::new()
     }
 }

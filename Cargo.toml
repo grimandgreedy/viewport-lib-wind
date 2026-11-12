@@ -40,3 +40,13 @@ path = "examples/wind_minimal.rs"
 [[example]]
 name = "wind-meadow"
 path = "examples/wind_meadow/main.rs"
+
+[[example]]
+name = "wind-2d-minimal"
+path = "examples/wind_2d_minimal.rs"
+required-features = ["2d"]
+
+[[example]]
+name = "wind-2d"
+path = "examples/wind_2d.rs"
+required-features = ["2d"]

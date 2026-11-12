@@ -350,3 +350,275 @@ mod tests {
         assert!(wind.sprite_deformers().is_empty());
     }
 }
+
+/// Renders sprites and tiles through the wind deformer and reads back where
+/// their edges land. One world unit is one pixel, with the world origin in the
+/// middle of the view.
+#[cfg(test)]
+mod render_tests {
+    use super::*;
+    use crate::field::WindAuthoring;
+    use crate::plugin::tests::try_make_device;
+    use glam::{Vec2, Vec3};
+    use viewport_lib::plugin_api::Uploads;
+    use viewport_lib::{
+        Camera2d, CameraFrame, Colour, FrameData, Plane2d, SceneFrame, TextureData,
+    };
+    use viewport_lib_plugins::item_types::sprite::{SpriteItem, SpriteSizeMode};
+    use viewport_lib_plugins::item_types::tilemap::{Tile, Tilemap, TilemapItem, Tileset};
+
+    const W: u32 = 240;
+    const H: u32 = 120;
+    const RED: Colour = Colour::linear(1.0, 0.0, 0.0, 1.0);
+    /// Side of every test sprite and tile, in world units.
+    const SIDE: f32 = 40.0;
+
+    struct Rig {
+        device: wgpu::Device,
+        queue: wgpu::Queue,
+        renderer: ViewportRenderer,
+        wind: WindPlugin,
+    }
+
+    /// A renderer with the wind installed for meshes and sprites, the field
+    /// set to `authoring` and advanced to time `t`. `None` without a device.
+    fn rig(authoring: WindAuthoring, t: f32) -> Option<Rig> {
+        let Some((device, queue)) = try_make_device() else {
+            eprintln!("skipping: no wgpu adapter available");
+            return None;
+        };
+        let config = viewport_lib::RendererConfig::new(wgpu::TextureFormat::Rgba8UnormSrgb)
+            .with_pipeline_compilation(viewport_lib::PipelineCompilation::Blocking);
+        let mut renderer = ViewportRenderer::with_config(&device, &config);
+        viewport_lib_plugins::item_types::install(&mut renderer, &device);
+        let wind = WindPlugin::new(authoring);
+        wind.install(renderer.resources_mut(), &device)
+            .expect("install");
+        wind.install_2d(&mut renderer, &device).expect("install_2d");
+        wind.step_and_write(&queue, t);
+        Some(Rig {
+            device,
+            queue,
+            renderer,
+            wind,
+        })
+    }
+
+    fn steady(strength: f32) -> WindAuthoring {
+        WindAuthoring {
+            direction: Vec3::X,
+            base_strength: strength,
+            gust_strength: 0.0,
+            gust_frequency: 0.0,
+            spatial_density: 0.0,
+        }
+    }
+
+    impl Rig {
+        fn render(&mut self, plane: Plane2d, scene: SceneFrame) -> Vec<u8> {
+            let camera = Camera2d::new(plane)
+                .with_units_per_pixel(1.0)
+                .with_viewport_size(Vec2::new(W as f32, H as f32))
+                .camera();
+            let frame = FrameData::new(
+                CameraFrame::from_camera(&camera, [W as f32, H as f32]),
+                scene,
+            );
+            // The default world origin follows the camera, and sprite
+            // positions are relative to it. Pass it to the wind the way a host
+            // does each frame, then draw again with it in the slot params.
+            self.renderer
+                .render_offscreen(&self.device, &self.queue, &frame, W, H);
+            self.wind.set_world_origin(self.renderer.world_origin());
+            self.wind.step_and_write(&self.queue, 0.0);
+            self.renderer
+                .render_offscreen(&self.device, &self.queue, &frame, W, H)
+        }
+
+        fn sprites(&mut self, plane: Plane2d, item: SpriteItem) -> Vec<u8> {
+            let mut scene = SceneFrame::default();
+            scene.items_mut::<SpriteItem>().push(item);
+            self.render(plane, scene)
+        }
+
+        /// Red world-space squares of side `SIDE` centred at `positions`,
+        /// swaying with the wind by `sways`.
+        fn squares(&self, positions: Vec<[f32; 3]>, sways: &[WindSway2d]) -> SpriteItem {
+            let mut item = SpriteItem::default();
+            item.positions = positions;
+            item.default_size = SIDE;
+            item.default_colour = RED;
+            item.size_mode = SpriteSizeMode::WorldSpace;
+            item.user_values = sways.iter().map(|s| s.to_user_value()).collect();
+            item.deformers = self.wind.sprite_deformers();
+            item
+        }
+    }
+
+    fn red_at(pixels: &[u8], col: usize, row: usize) -> bool {
+        let i = (row * W as usize + col) * 4;
+        pixels[i] > 180 && pixels[i + 1] < 80 && pixels[i + 2] < 80
+    }
+
+    fn red(pixels: &[u8], x: f32, y: f32) -> bool {
+        let col = (W as f32 * 0.5 + x).floor() as usize;
+        let row = (H as f32 * 0.5 - y).floor() as usize;
+        red_at(pixels, col, row)
+    }
+
+    /// The world x of the first red pixel centre at or right of `from` on the
+    /// pixel row whose centre is at height `y`.
+    fn left_edge(pixels: &[u8], from: f32, y: f32) -> f32 {
+        let row = (H as f32 * 0.5 - y).floor() as usize;
+        let start = (W as f32 * 0.5 + from).floor().max(0.0) as usize;
+        let col = (start..W as usize)
+            .find(|&c| red_at(pixels, c, row))
+            .expect("a red pixel on the row");
+        col as f32 + 0.5 - W as f32 * 0.5
+    }
+
+    /// The height of the topmost and bottommost pixel row centres inside a
+    /// square centred at height 0.
+    const TOP_ROW: f32 = SIDE * 0.5 - 0.5;
+    const BOTTOM_ROW: f32 = -SIDE * 0.5 + 0.5;
+
+    /// The left edge of a square centred at `x`, displaced at its top by
+    /// `shift`, at height `y`. A red pixel centre lies at or right of it.
+    fn expected_left(x: f32, shift: f32, y: f32) -> f32 {
+        x - SIDE * 0.5 + shift * (y + SIDE * 0.5) / SIDE
+    }
+
+    fn assert_left_edge(pixels: &[u8], x: f32, shift: f32, y: f32) {
+        let want = expected_left(x, shift, y);
+        let got = left_edge(pixels, want - 6.0, y);
+        assert!(
+            got >= want - 0.25 && got <= want + 1.25,
+            "square at {x}, row {y}: left edge pixel {got}, edge expected at {want}"
+        );
+    }
+
+    /// Two squares on `plane`, centred at x = -60 and 60 at height 0, sway by
+    /// `dot(WindField::sample(base), right)` at their top edge, with right
+    /// world +X on both planes.
+    fn top_edge_follows_the_field(plane: Plane2d, at: fn(f32, f32) -> Vec3) {
+        let authoring = WindAuthoring {
+            direction: Vec3::new(1.0, 0.3, 0.0),
+            base_strength: 4.0,
+            gust_strength: 8.0,
+            gust_frequency: 1.3,
+            spatial_density: 0.02,
+        };
+        let Some(mut rig) = rig(authoring, 0.7) else {
+            return;
+        };
+        let field = rig.wind.field();
+        let xs = [-60.0, 60.0];
+        let item = rig.squares(
+            xs.iter().map(|&x| at(x, 0.0).to_array()).collect(),
+            &[WindSway2d::new(1.0); 2],
+        );
+        let pixels = rig.sprites(plane, item);
+        let shifts: Vec<f32> = xs
+            .iter()
+            .map(|&x| field.sample(at(x, -SIDE * 0.5)).dot(Vec3::X))
+            .collect();
+        assert!(
+            (shifts[0] - shifts[1]).abs() > 2.0,
+            "the two squares should sit at different gust phases: {shifts:?}"
+        );
+        for (&x, &shift) in xs.iter().zip(&shifts) {
+            assert_left_edge(&pixels, x, shift, TOP_ROW);
+            assert_left_edge(&pixels, x, shift, BOTTOM_ROW);
+        }
+    }
+
+    #[test]
+    fn the_top_edge_follows_the_field_on_xy() {
+        top_edge_follows_the_field(Plane2d::Xy, |x, h| Vec3::new(x, h, 0.0));
+    }
+
+    #[test]
+    fn the_top_edge_follows_the_field_on_xz() {
+        top_edge_follows_the_field(Plane2d::Xz, |x, h| Vec3::new(x, 0.0, h));
+    }
+
+    #[test]
+    fn zero_weight_and_zero_wind_leave_the_quad_still() {
+        let Some(mut rig) = rig(steady(10.0), 0.0) else {
+            return;
+        };
+        // The second square has no user value at all.
+        let item = rig.squares(
+            vec![[-60.0, 0.0, 0.0], [60.0, 0.0, 0.0]],
+            &[WindSway2d::new(0.0)],
+        );
+        let pixels = rig.sprites(Plane2d::Xy, item);
+        assert_left_edge(&pixels, -60.0, 0.0, TOP_ROW);
+        assert_left_edge(&pixels, 60.0, 0.0, TOP_ROW);
+
+        rig.wind.set_authoring(steady(0.0));
+        rig.wind.step_and_write(&rig.queue, 0.0);
+        let item = rig.squares(vec![[0.0, 0.0, 0.0]], &[WindSway2d::new(1.0)]);
+        let pixels = rig.sprites(Plane2d::Xy, item);
+        assert_left_edge(&pixels, 0.0, 0.0, TOP_ROW);
+    }
+
+    #[test]
+    fn only_the_tiles_in_the_table_sway() {
+        let Some(mut rig) = rig(steady(10.0), 0.0) else {
+            return;
+        };
+        let mut tileset = Tileset::new(None, [8, 8], 1);
+        tileset.user_values = WindSway2d::tile_values(&[(0, WindSway2d::new(1.0))]);
+        let mut map = Tilemap::new(tileset, [2, 1]);
+        map.set(0, 0, Tile::new(0));
+        map.set(1, 0, Tile::new(1));
+        let map_id = rig
+            .renderer
+            .upload(&rig.device, &rig.queue, &map)
+            .expect("upload");
+        let mut layer = TilemapItem::new(map_id);
+        layer.origin = [-SIDE, -SIDE * 0.5];
+        layer.cell_size = [SIDE, SIDE];
+        layer.tint = RED;
+        layer.deformers = rig.wind.sprite_deformers();
+        let mut scene = SceneFrame::default();
+        scene.items_mut::<TilemapItem>().push(layer);
+        let pixels = rig.render(Plane2d::Xy, scene);
+        // Tile 0 spans -40..0 and leans 10 right at its top; tile 1 spans
+        // 0..40 and stands still.
+        assert_left_edge(&pixels, -SIDE * 0.5, 10.0, TOP_ROW);
+        assert_left_edge(&pixels, -SIDE * 0.5, 10.0, BOTTOM_ROW);
+        assert!(
+            red(&pixels, SIDE - 0.5, TOP_ROW),
+            "tile 1 keeps its top right"
+        );
+        assert!(!red(&pixels, SIDE + 0.5, TOP_ROW), "and does not lean");
+    }
+
+    #[test]
+    fn pixel_art_steps_by_whole_texels() {
+        let Some(mut rig) = rig(steady(7.0), 0.0) else {
+            return;
+        };
+        // An 8 texel texture over 40 units: one texel is 5 units, so a 7 unit
+        // offset rounds to 5.
+        let texture = rig
+            .renderer
+            .resources_mut()
+            .upload_texture(
+                &rig.device,
+                &rig.queue,
+                TextureData::srgb(8, 8, vec![255; 8 * 8 * 4]),
+            )
+            .expect("texture upload");
+        let mut item = rig.squares(
+            vec![[-60.0, 0.0, 0.0], [60.0, 0.0, 0.0]],
+            &[WindSway2d::new(1.0).with_pixel_art(), WindSway2d::new(1.0)],
+        );
+        item.texture_id = Some(texture);
+        let pixels = rig.sprites(Plane2d::Xy, item);
+        assert_left_edge(&pixels, -60.0, 5.0, TOP_ROW);
+        assert_left_edge(&pixels, 60.0, 7.0, TOP_ROW);
+    }
+}
