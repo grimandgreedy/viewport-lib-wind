@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.3.0]
+
+- Works with viewport-lib 0.24.
+- Sprite and tile layer sway behind the `2d` feature, weighted per sprite and per tile, with a pixel-art mode that steps by the drawn texel on sliced and tiled sprites. See the `wind-2d` examples.
+
 ## [0.2.0]
 
 - Works with viewport-lib 0.23.

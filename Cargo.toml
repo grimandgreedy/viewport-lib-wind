@@ -1,6 +1,6 @@
 [package]
 name = "viewport-lib-wind"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 rust-version = "1.85"
 description = "Wind field plugin for viewport-lib: per-vertex displacement, CPU sampler, runtime + GPU plugins"
@@ -15,12 +15,12 @@ publish = true
 exclude = ["/assets/"]
 
 [dependencies]
-viewport-lib = { version = "0.23" }
+viewport-lib = { version = "0.24" }
 glam = { version = "=0.30.10", features = ["bytemuck"] }
 bytemuck = { version = "1", features = ["derive"] }
 wgpu = "27.0"
 # Sprite and tile sway, behind the `2d` feature.
-viewport-lib-plugins = { version = "0.1", default-features = false, features = ["wgpu27", "item-types"], optional = true }
+viewport-lib-plugins = { version = "0.2", default-features = false, features = ["wgpu27", "item-types"], optional = true }
 
 [features]
 # Sway for viewport-lib's sprites and tile layers.
@@ -29,9 +29,9 @@ viewport-lib-plugins = { version = "0.1", default-features = false, features = [
 [dev-dependencies]
 pollster = "0.4"
 # The meadow example runs on ViewportApp.
-viewport-lib = { version = "0.23", features = ["app"] }
+viewport-lib = { version = "0.24", features = ["app"] }
 # Loads the meadow models and their textures.
-viewport-lib-io = { version = "0.9", default-features = false, features = ["gltf", "png"] }
+viewport-lib-io = { version = "0.10", default-features = false, features = ["gltf", "png"] }
 
 [[example]]
 name = "wind-minimal"

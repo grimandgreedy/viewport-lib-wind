@@ -50,6 +50,7 @@ cargo run --release --example wind-2d --features 2d
 
 | viewport-lib-wind | viewport-lib |
 | --- | --- |
+| 0.3.0 | 0.24 |
 | 0.2.0 | 0.23 |
 | 0.1.0 | 0.19 |
 
