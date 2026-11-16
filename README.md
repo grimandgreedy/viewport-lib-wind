@@ -8,6 +8,28 @@ With the `2d` feature, sprites and tile layers sway in the same field: each quad
   <img src="https://raw.githubusercontent.com/grimandgreedy/viewport-lib-wind/refs/heads/master/assets/wind.gif" alt="viewport-lib-wind" width="50%" />
 </p>
 
+## Meshes
+
+Register the wind deformer, add the CPU and GPU halves to the runtime, then give each mesh that should sway a per-vertex mask:
+
+```rust
+use viewport_lib::runtime::ViewportRuntime;
+use viewport_lib_wind::{WindAuthoring, WindPlugin, WindSwayWeights};
+
+let wind = WindPlugin::new(WindAuthoring::default());
+wind.install(renderer.resources_mut(), &device)?;
+
+let runtime = ViewportRuntime::new()
+    .with_plugin(wind.cpu_plugin())
+    .with_gpu_plugin(wind.gpu_plugin());
+
+// Still at z = 0, full sway at the tip.
+let mask = WindSwayWeights::height_falloff(&positions, 0.0, top_z);
+wind.attach_sway_mask(renderer.resources_mut(), &device, mesh_id, &mask);
+```
+
+`WindSwayWeights::uniform` sways every vertex by the same amount, for flags and banners. `wind.field().sample(position)` returns the same wind vector on the CPU.
+
 ## Sprites and tiles
 
 Enable the `2d` feature. Register the sprite and tile deformer after viewport-lib's item types, then opt batches and layers in and give each sprite or tile a `WindSway2d`:
@@ -56,6 +78,4 @@ cargo run --release --example wind-2d --features 2d
 
 ## License
 
-`viewport-lib-wind` is a part of the viewport-lib ecosystem.
-
-GPL-3.0
+GPL-3.0-only. See [LICENSE](LICENSE).
